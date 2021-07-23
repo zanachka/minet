@@ -12,16 +12,14 @@ from ural import is_url
 
 from minet.utils import rate_limited
 from minet.web import request
-from minet.cli.constants import DEFAULT_PREBUFFER_BYTES
 from minet.cli.utils import die, LoadingBar
 
 REPORT_HEADERS = ['approx_likes', 'approx_likes_int']
-ONE_LIKE_RE = re.compile(rb'>\s*One person likes this\.', re.I)
-LIKES_RE = re.compile(rb'>\s*([\d.KM]+)\s+people\s+like', re.I)
+NUMBER_RE = re.compile(rb'>(\d+\.?\d*[KM]?)<', re.I)
 
 
 def forge_url(url):
-    return 'https://www.facebook.com/plugins/like.php?href=%s' % quote(url)
+    return 'https://www.facebook.com/plugins/share_button.php?href=%s&layout=button_count' % quote(url)
 
 
 @rate_limited(5)
@@ -37,21 +35,9 @@ def make_request(url):
     return err, response.data
 
 
-def parse_approx_likes(approx_likes, unit='K'):
-    multiplier = 1000
-
-    if unit == 'M':
-        multiplier = 1000000
-
-    return str(int(float(approx_likes[:-1]) * multiplier))
-
-
 def scrape(data):
 
-    if ONE_LIKE_RE.search(data):
-        return ['1', '1']
-
-    match = LIKES_RE.search(data)
+    match = NUMBER_RE.search(data)
 
     if match is None:
         return ['', '']
@@ -60,10 +46,10 @@ def scrape(data):
     approx_likes_int = approx_likes
 
     if 'K' in approx_likes:
-        approx_likes_int = parse_approx_likes(approx_likes, unit='K')
+        approx_likes_int = str(int(float(approx_likes[:-1]) * 10**3))
 
     elif 'M' in approx_likes:
-        approx_likes_int = parse_approx_likes(approx_likes, unit='M')
+        approx_likes_int = str(int(float(approx_likes[:-1]) * 10**6))
 
     return [approx_likes, approx_likes_int]
 
@@ -74,11 +60,10 @@ def facebook_url_likes_action(cli_args):
         cli_args.output,
         keep=cli_args.select,
         add=REPORT_HEADERS,
-        total=cli_args.total,
-        prebuffer_bytes=DEFAULT_PREBUFFER_BYTES
+        total=cli_args.total
     )
 
-    if cli_args.column not in enricher.pos:
+    if cli_args.column not in enricher.headers:
         die([
             'Could not find the "%s" column containing the urls in the given CSV file.' % cli_args.column
         ])

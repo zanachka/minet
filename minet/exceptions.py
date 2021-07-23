@@ -6,9 +6,11 @@
 #
 
 
+# Base minet error
 class MinetError(Exception):
     def __init__(self, message=None):
         super().__init__('' if message is None else message)
+        self.message = message
 
     def __repr__(self):
         representation = '<' + self.__class__.__name__
@@ -92,3 +94,11 @@ class TrafilaturaError(MinetError):
     def __init__(self, msg=None, reason=None):
         super().__init__(msg)
         self.reason = reason
+
+
+# Filesystem errors
+class FilenameFormattingError(MinetError):
+    def __init__(self, msg=None, reason=None, template=None):
+        super().__init__(msg)
+        self.reason = reason
+        self.template = template

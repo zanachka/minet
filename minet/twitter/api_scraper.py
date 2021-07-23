@@ -24,6 +24,7 @@ from minet.twitter.constants import (
 )
 from minet.twitter.exceptions import (
     TwitterGuestTokenError,
+    TwitterPublicAPIBadRequest,
     TwitterPublicAPIRateLimitError,
     TwitterPublicAPIInvalidResponseError,
     TwitterPublicAPIParsingError,
@@ -43,6 +44,10 @@ GUEST_TOKEN_COOKIE_PATTERN = re.compile(rb'document\.cookie = decodeURIComponent
 # =============================================================================
 # Helpers
 # =============================================================================
+def is_query_too_long(query):
+    return len(quote(query)) > MAXIMUM_QUERY_LENGTH
+
+
 def forge_search_url(query):
     return (
         'https://twitter.com/search?f=live&type=spelling_expansion_revert_click&q=%s' %
@@ -271,6 +276,9 @@ class TwitterAPIScraper(object):
         if response.status >= 400:
             error = getpath(data, ['errors', 0])
 
+            if error is not None and response.status == 400 and error.get('code') == 47:
+                raise TwitterPublicAPIBadRequest
+
             if error is not None and error.get('code') == 130:
                 raise TwitterPublicAPIOverCapacityError
 
@@ -299,9 +307,9 @@ class TwitterAPIScraper(object):
                         continue
 
                     if is_first:
-                        extracted_tweets.append((extracted_tweet, meta))
+                        tweets.append((extracted_tweet, meta))
                     else:
-                        extracted_tweets.append((extracted_tweet, None))
+                        tweets.append((extracted_tweet, None))
 
                     refs.add(id_int64)
             else:
@@ -312,7 +320,7 @@ class TwitterAPIScraper(object):
     def search(self, query, limit=None, before_sleep=None,
                include_referenced_tweets=False, with_meta=False):
 
-        if len(query) > MAXIMUM_QUERY_LENGTH:
+        if is_query_too_long(query):
             raise TwitterPublicAPIQueryTooLongError
 
         cursor = None

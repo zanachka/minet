@@ -26,7 +26,8 @@ from minet.exceptions import (
     InfiniteRedirectsError,
     SelfRedirectError,
     InvalidRedirectError,
-    TrafilaturaError
+    TrafilaturaError,
+    FilenameFormattingError
 )
 from minet.scrape.constants import (
     BURROWING_KEYS,
@@ -60,7 +61,7 @@ def max_retry_error_reporter(error):
 def new_connection_error_reporter(error):
     msg = repr(error).lower()
 
-    if 'name or service not known' in msg or 'Errno 8' in msg:
+    if 'name or service not known' in msg or 'errno 8' in msg:
         return 'unknown-host'
 
     if 'connection refused' in msg:
@@ -106,7 +107,8 @@ ERROR_REPORTERS = {
     SelfRedirectError: 'self-redirect',
     InvalidRedirectError: 'invalid-redirect',
     DecodeError: decode_error_reporter,
-    TrafilaturaError: 'trafilatura-error'
+    TrafilaturaError: 'trafilatura-error',
+    FilenameFormattingError: 'filename-formatting-error'
 }
 
 
@@ -187,3 +189,9 @@ def report_scraper_evaluation_error(error):
     p()
 
     return output.getvalue()
+
+
+def report_filename_formatting_error(error):
+    return '> error when formatting filename using: {template}'.format(
+        template=colored(error.template, 'cyan')
+    )

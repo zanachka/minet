@@ -33,6 +33,7 @@
 * [facebook (fb)](#facebook)
   * [comments](#facebook-comments)
   * [posts](#facebook-posts)
+  * [post-authors](#facebook-post-authors)
   * [url-likes](#facebook-url-likes)
 * [google](#google)
   * [sheets](#google-sheets)
@@ -150,10 +151,10 @@ examples:
     $ minet cookies firefox --csv > cookies.csv
 
 . Print cookie for lemonde.fr:
-    $ minet cookie firefox --url https://www.lemonde.fr
+    $ minet cookies firefox --url https://www.lemonde.fr
 
 . Dump cookie morsels for lemonde.fr as CSV:
-    $ minet cookie firefox --url https://www.lemonde.fr --csv > morsels.csv
+    $ minet cookies firefox --url https://www.lemonde.fr --csv > morsels.csv
 
 ```
 
@@ -189,8 +190,9 @@ examples:
 ```
 usage: minet fetch [-h] [--domain-parallelism DOMAIN_PARALLELISM]
                    [-g {chrome,chromium,edge,firefox,opera}] [-H HEADERS]
-                   [--insecure] [-o OUTPUT] [--resume] [-s SELECT] [-t THREADS]
-                   [--throttle THROTTLE] [--timeout TIMEOUT] [--total TOTAL]
+                   [--insecure] [-o OUTPUT] [--resume] [-s SELECT]
+                   [--separator SEPARATOR] [-t THREADS] [--throttle THROTTLE]
+                   [--timeout TIMEOUT] [--total TOTAL]
                    [--url-template URL_TEMPLATE] [-X METHOD]
                    [--max-redirects MAX_REDIRECTS] [--compress]
                    [--contents-in-report] [-d OUTPUT_DIR] [-f FILENAME]
@@ -221,6 +223,7 @@ optional arguments:
   -o OUTPUT, --output OUTPUT                      Path to the output file. By default, the results will be printed to stdout.
   --resume                                        Whether to resume from an aborted report.
   -s SELECT, --select SELECT                      Columns of input CSV file to include in the output (separated by `,`).
+  --separator SEPARATOR                           Character used to split the url cell in the CSV file, if this one can in fact contain multiple urls.
   -t THREADS, --threads THREADS                   Number of threads to use. Defaults to 25.
   --throttle THROTTLE                             Time to wait - in seconds - between 2 calls to the same domain. Defaults to 0.2.
   --timeout TIMEOUT                               Maximum time - in seconds - to spend for each request before triggering a timeout. Defaults to ~30s.
@@ -232,8 +235,8 @@ optional arguments:
   --contents-in-report, --no-contents-in-report   Whether to include retrieved contents, e.g. html, directly in the report
                                                   and avoid writing them in a separate folder. This requires to standardize
                                                   encoding and won't work on binary formats.
-  -d OUTPUT_DIR, --output-dir OUTPUT_DIR          Directory where the fetched files will be written. Defaults to "content".
-  -f FILENAME, --filename FILENAME                Name of the column used to build retrieved file names. Defaults to an uuid v4. If the provided file names have no extension (e.g. ".jpg", ".pdf", etc.) the correct extension will be added depending on the file type.
+  -d OUTPUT_DIR, --output-dir OUTPUT_DIR          Directory where the fetched files will be written. Defaults to "downloaded".
+  -f FILENAME, --filename FILENAME                Name of the column used to build retrieved file names. Defaults to a md5 hash of final url. If the provided file names have no extension (e.g. ".jpg", ".pdf", etc.) the correct extension will be added depending on the file type.
   --filename-template FILENAME_TEMPLATE           A template for the name of the fetched files.
   --folder-strategy FOLDER_STRATEGY               Name of the strategy to be used to dispatch the retrieved files into folders to alleviate issues on some filesystems when a folder contains too much files. Note that this will be applied on top of --filename-template. Defaults to "flat". All of the strategies are described at the end of this help.
   --keep-failed-contents                          Whether to keep & write contents for failed (i.e. non-200) http requests.
@@ -263,7 +266,7 @@ columns being added to the output:
   having a name that is the first x characters of the file's name.
   This is an efficient way to partition content into folders containing
   roughly the same number of files if the file names are random (which
-  is the case by default since uuids will be used).
+  is the case by default since md5 hashes will be used).
 
 . "hostname": files will be written in folders based on their url's
   full host name.
@@ -288,8 +291,8 @@ examples:
 ## extract
 
 ```
-usage: minet extract [-h] [-i INPUT_DIR] [-o OUTPUT] [-p PROCESSES] [-s SELECT]
-                     [--total TOTAL]
+usage: minet extract [-h] [-g GLOB] [-i INPUT_DIR] [-o OUTPUT] [-p PROCESSES]
+                     [-s SELECT] [--total TOTAL]
                      [report]
 
 Minet Extract Command
@@ -312,7 +315,8 @@ positional arguments:
 
 optional arguments:
   -h, --help                           show this help message and exit
-  -i INPUT_DIR, --input-dir INPUT_DIR  Directory where the HTML files are stored. Defaults to "content".
+  -g GLOB, --glob GLOB                 Whether to extract text from a bunch of html files on disk matched by a glob pattern rather than sourcing them from a CSV report.
+  -i INPUT_DIR, --input-dir INPUT_DIR  Directory where the HTML files are stored. Defaults to "downloaded" if --glob is not set.
   -o OUTPUT, --output OUTPUT           Path to the output file. By default, the results will be printed to stdout.
   -p PROCESSES, --processes PROCESSES  Number of processes to use. Defaults to roughly half of the available CPUs.
   -s SELECT, --select SELECT           Columns of input CSV file to include in the output (separated by `,`).
@@ -341,8 +345,11 @@ columns being added to the output:
 
 examples:
 
-. Extracting raw text from a `minet fetch` report:
+. Extracting text from a `minet fetch` report:
     $ minet extract report.csv > extracted.csv
+
+. Extracting text from a bunch of files using a glob pattern:
+    $ minet extract --glob "./content/**/*.html" > extracted.csv
 
 . Working on a report from stdin:
     $ minet fetch url_column file.csv | minet extract > extracted.csv
@@ -355,8 +362,9 @@ examples:
 usage: minet resolve [-h] [--domain-parallelism DOMAIN_PARALLELISM]
                      [-g {chrome,chromium,edge,firefox,opera}] [-H HEADERS]
                      [--insecure] [-o OUTPUT] [--resume] [-s SELECT]
-                     [-t THREADS] [--throttle THROTTLE] [--timeout TIMEOUT]
-                     [--total TOTAL] [--url-template URL_TEMPLATE] [-X METHOD]
+                     [--separator SEPARATOR] [-t THREADS] [--throttle THROTTLE]
+                     [--timeout TIMEOUT] [--total TOTAL]
+                     [--url-template URL_TEMPLATE] [-X METHOD]
                      [--max-redirects MAX_REDIRECTS] [--follow-meta-refresh]
                      [--follow-js-relocation] [--infer-redirection]
                      [--only-shortened]
@@ -383,6 +391,7 @@ optional arguments:
   -o OUTPUT, --output OUTPUT                      Path to the output file. By default, the results will be printed to stdout.
   --resume                                        Whether to resume from an aborted report.
   -s SELECT, --select SELECT                      Columns of input CSV file to include in the output (separated by `,`).
+  --separator SEPARATOR                           Character used to split the url cell in the CSV file, if this one can in fact contain multiple urls.
   -t THREADS, --threads THREADS                   Number of threads to use. Defaults to 25.
   --throttle THROTTLE                             Time to wait - in seconds - between 2 calls to the same domain. Defaults to 0.2.
   --timeout TIMEOUT                               Maximum time - in seconds - to spend for each request before triggering a timeout. Defaults to ~30s.
@@ -443,7 +452,7 @@ optional arguments:
   -h, --help                            show this help message and exit
   -f {csv,jsonl}, --format {csv,jsonl}  Output format.
   -g GLOB, --glob GLOB                  Whether to scrape a bunch of html files on disk matched by a glob pattern rather than sourcing them from a CSV report.
-  -i INPUT_DIR, --input-dir INPUT_DIR   Directory where the HTML files are stored. Defaults to "content".
+  -i INPUT_DIR, --input-dir INPUT_DIR   Directory where the HTML files are stored. Defaults to "downloaded".
   -o OUTPUT, --output OUTPUT            Path to the output file. By default, the results will be printed to stdout.
   -p PROCESSES, --processes PROCESSES   Number of processes to use. Defaults to roughly half of the available CPUs.
   --separator SEPARATOR                 Separator use to join lists of values when output format is CSV. Defaults to "|".
@@ -891,7 +900,8 @@ examples:
 ## Facebook
 
 ```
-usage: minet facebook [-h] {comments,posts,post-stats,url-likes} ...
+usage: minet facebook [-h]
+                      {comments,posts,post-authors,post-stats,url-likes} ...
 
 Minet Facebook Command
 ======================
@@ -899,10 +909,11 @@ Minet Facebook Command
 Collects data from Facebook.
 
 optional arguments:
-  -h, --help                             show this help message and exit
+  -h, --help                                      show this help message and exit
 
 actions:
-  {comments,posts,post-stats,url-likes}  Action to perform to collect data on Facebook
+  {comments,posts,post-authors,post-stats,url-likes}
+                                                  Action to perform to collect data on Facebook
 
 ```
 
@@ -1014,6 +1025,40 @@ examples:
 
 ```
 
+<h3 id="facebook-post-authors">post-authors</h3>
+
+```
+usage: minet facebook post-authors [-h] [-c COOKIE] [-o OUTPUT] [-s SELECT]
+                                   [--throttle THROTTLE] [--total TOTAL]
+                                   column [file]
+
+Minet Facebook Post Authors Command
+===================================
+
+Retrieve the author of the given Facebook posts.
+
+Note that it is only relevant for group posts since
+only administrators can post something on pages.
+
+positional arguments:
+  column                      Name of the CSV column containing the posts' urls.
+  file                        CSV file containing the posts.
+
+optional arguments:
+  -h, --help                  show this help message and exit
+  -c COOKIE, --cookie COOKIE  Authenticated cookie to use or browser from which to extract it (supports "firefox", "chrome", "chromium", "opera" and "edge"). Defaults to "firefox". Can also be configured in a .minetrc file as "facebook.cookie" or read from the MINET_FACEBOOK_COOKIE env variable.
+  -o OUTPUT, --output OUTPUT  Path to the output file. By default, the results will be printed to stdout.
+  -s SELECT, --select SELECT  Columns of input CSV file to include in the output (separated by `,`).
+  --throttle THROTTLE         Throttling time, in seconds, to wait between each request.
+  --total TOTAL               Total number of lines in CSV file. Necessary if you want to display a finite progress indicator for large input files.
+
+examples:
+
+. Fetching authors of a series of posts in a CSV file:
+    $ minet fb post-authors post_url fb-posts.csv > authors.csv
+
+```
+
 <h3 id="facebook-url-likes">url-likes</h3>
 
 ```
@@ -1023,15 +1068,16 @@ usage: minet facebook url-likes [-h] [-o OUTPUT] [-s SELECT] [--total TOTAL]
 Minet Facebook Url Likes Command
 ================================
 
-Retrieve the approximate number of "likes" each url of
-a CSV file has on Facebook.
+Retrieve the approximate number of "likes" (actually an aggregated engagement metric)
+that a url got on Facebook. The command can also be used with a list of urls stored in a CSV file.
+This number is found by scraping Facebook's share button, which only gives a
+rough estimation of the real engagement metric: "Share 45K" for example.
 
-It is found by scraping Facebook's like button, which only give a
-rough estimation of the real number like so: "1.2K people like this."
-
-Note that the number does not actually only correspond to the number of
-like reactions, but rather to the sum of like, love, ahah, angry, etc.
-reactions plus the number of comments and shares that the URL generated on Facebook.
+Note that this number does not actually only correspond to the number of
+likes or shares, but it is rather the sum of like, love, ahah, angry, etc.
+reactions plus the number of comments and shares that the URL got on Facebook
+(here is the official documentation: https://developers.facebook.com/docs/plugins/faqs
+explaining "What makes up the number shown next to my Share button?").
 
 positional arguments:
   column                      Name of the column containing the URL in the CSV file or a single url.
@@ -1044,8 +1090,10 @@ optional arguments:
   --total TOTAL               Total number of lines in CSV file. Necessary if you want to display a finite progress indicator for large input files.
 
 example:
+. Retrieving the "like" number for one url:
+    $ minet fb url-likes "www.example-url.com" > url_like.csv
 
-. Retrieving likes for the urls listed in a CSV file:
+. Retrieving the "like" number for the urls listed in a CSV file:
     $ minet fb url-likes url url.csv > url_likes.csv
 
 ```
@@ -1324,6 +1372,14 @@ Minet Twitter Scrape Command
 
 Scrape Twitter's public facing search API to collect tweets etc.
 
+Be sure to check Twitter's advanced search to check what kind of
+operators you can use to tune your queries (time range, hashtags,
+mentions, boolean etc.):
+https://twitter.com/search-advanced?f=live
+
+Useful operators include "since" and "until" to search specific
+time ranges like so: "since:2014-01-01 until:2017-12-31".
+
 positional arguments:
   {tweets}                         What to scrape. Currently only `tweets` is possible.
   query                            Search query or name of the column containing queries to run in given CSV file.
@@ -1347,6 +1403,15 @@ examples:
 
 . Templating the given CSV column to query tweets by users:
     $ minet tw scrape tweets user users.csv --query-template 'from:@{value}' > tweets.csv
+
+. Tip: You can add a "OR @aNotExistingHandle" to your query to avoid searching
+  for your query terms in usernames or handles.
+  Note that this is a temporary hack which might stop working at any time so be
+  sure to double check before relying on this trick.
+  For more information see the related discussion here:
+  https://webapps.stackexchange.com/questions/127425/how-to-exclude-usernames-and-handles-while-searching-twitter
+
+    $ minet tw scrape tweets "keyword OR @anObviouslyNotExistingHandle"
 
 ```
 

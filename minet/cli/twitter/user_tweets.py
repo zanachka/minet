@@ -6,7 +6,6 @@
 #
 import casanova
 from twitwi import (
-    TwitterWrapper,
     normalize_tweet,
     format_tweet_as_csv_row
 )
@@ -15,11 +14,12 @@ from twitter import TwitterHTTPError
 
 from minet.cli.utils import LoadingBar
 from minet.twitter.constants import TWITTER_API_MAX_STATUSES_COUNT
+from minet.twitter import TwitterAPIClient
 
 
 def twitter_user_tweets_action(cli_args):
 
-    wrapper = TwitterWrapper(
+    client = TwitterAPIClient(
         cli_args.access_token,
         cli_args.access_token_secret,
         cli_args.api_key,
@@ -30,13 +30,14 @@ def twitter_user_tweets_action(cli_args):
         cli_args.file,
         cli_args.output,
         keep=cli_args.select,
-        add=TWEET_FIELDS
+        add=TWEET_FIELDS,
+        total=cli_args.total
     )
 
     loading_bar = LoadingBar(
         'Retrieving tweets',
-        total=cli_args.total,
-        unit='tweet'
+        total=enricher.total,
+        unit='user'
     )
 
     for row, user in enricher.cells(cli_args.column, with_rows=True):
@@ -60,21 +61,21 @@ def twitter_user_tweets_action(cli_args):
             loading_bar.inc('calls')
 
             try:
-                tweets = wrapper.call(['statuses', 'user_timeline'], **kwargs)
+                tweets = client.call(['statuses', 'user_timeline'], **kwargs)
             except TwitterHTTPError as e:
                 loading_bar.inc('errors')
 
                 if e.e.code == 404:
                     loading_bar.print('Could not find user "%s"' % user)
                 else:
-                    loading_bar.print('An error happened when attempting to retrieve tweets from "%s"' % user)
+                    loading_bar.print('An error happened when attempting to retrieve tweets from "%s" (HTTP status %i)' % (user, e.e.code))
 
                 break
 
             if not tweets:
                 break
 
-            loading_bar.update(len(tweets))
+            loading_bar.inc('tweets', len(tweets))
 
             max_id = min(int(tweet['id_str']) for tweet in tweets) - 1
 
@@ -87,4 +88,4 @@ def twitter_user_tweets_action(cli_args):
 
                 enricher.writerow(row, addendum)
 
-        loading_bar.inc('done')
+        loading_bar.update()

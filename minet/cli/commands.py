@@ -13,8 +13,12 @@ from casanova import (
 )
 from ural import is_url
 
-from minet.constants import DEFAULT_THROTTLE
-from minet.cli.defaults import DEFAULT_CONTENT_FOLDER
+from minet.constants import (
+    DEFAULT_THROTTLE,
+    DEFAULT_FETCH_MAX_REDIRECTS,
+    DEFAULT_RESOLVE_MAX_REDIRECTS
+)
+from minet.cli.constants import DEFAULT_CONTENT_FOLDER
 from minet.cli.argparse import (
     BooleanAction,
     ConfigAction,
@@ -105,6 +109,10 @@ FETCH_COMMON_ARGUMENTS = [
         'type': SplitterType()
     },
     {
+        'flags': ['--separator'],
+        'help': 'Character used to split the url cell in the CSV file, if this one can in fact contain multiple urls.'
+    },
+    {
         'flags': ['-t', '--threads'],
         'help': 'Number of threads to use. Defaults to 25.',
         'type': int,
@@ -160,10 +168,10 @@ MINET_COMMANDS = {
                 $ minet cookies firefox --csv > cookies.csv
 
             . Print cookie for lemonde.fr:
-                $ minet cookie firefox --url https://www.lemonde.fr
+                $ minet cookies firefox --url https://www.lemonde.fr
 
             . Dump cookie morsels for lemonde.fr as CSV:
-                $ minet cookie firefox --url https://www.lemonde.fr --csv > morsels.csv
+                $ minet cookies firefox --url https://www.lemonde.fr --csv > morsels.csv
         ''',
         'arguments': [
             {
@@ -651,8 +659,11 @@ MINET_COMMANDS = {
 
             examples:
 
-            . Extracting raw text from a `minet fetch` report:
+            . Extracting text from a `minet fetch` report:
                 $ minet extract report.csv > extracted.csv
+
+            . Extracting text from a bunch of files using a glob pattern:
+                $ minet extract --glob "./content/**/*.html" > extracted.csv
 
             . Working on a report from stdin:
                 $ minet fetch url_column file.csv | minet extract > extracted.csv
@@ -664,9 +675,12 @@ MINET_COMMANDS = {
                 'action': InputFileAction
             },
             {
+                'flags': ['-g', '--glob'],
+                'help': 'Whether to extract text from a bunch of html files on disk matched by a glob pattern rather than sourcing them from a CSV report.'
+            },
+            {
                 'flags': ['-i', '--input-dir'],
-                'help': 'Directory where the HTML files are stored. Defaults to "%s".' % DEFAULT_CONTENT_FOLDER,
-                'default': DEFAULT_CONTENT_FOLDER
+                'help': 'Directory where the HTML files are stored. Defaults to "%s" if --glob is not set.' % DEFAULT_CONTENT_FOLDER
             },
             {
                 'flags': ['-o', '--output'],
@@ -845,6 +859,60 @@ MINET_COMMANDS = {
                         }
                     ]
                 },
+                'post-authors': {
+                    'title': 'Minet Facebook Post Authors Command',
+                    'description': '''
+                        Retrieve the author of the given Facebook posts.
+
+                        Note that it is only relevant for group posts since
+                        only administrators can post something on pages.
+                    ''',
+                    'epilog': '''
+                        examples:
+
+                        . Fetching authors of a series of posts in a CSV file:
+                            $ minet fb post-authors post_url fb-posts.csv > authors.csv
+                    ''',
+                    'arguments': [
+                        {
+                            'name': 'column',
+                            'help': 'Name of the CSV column containing the posts\' urls.'
+                        },
+                        {
+                            'name': 'file',
+                            'help': 'CSV file containing the posts.',
+                            'action': InputFileAction,
+                            'dummy_csv_column': 'post_url'
+                        },
+                        {
+                            'flags': ['-c', '--cookie'],
+                            'help': 'Authenticated cookie to use or browser from which to extract it (supports "firefox", "chrome", "chromium", "opera" and "edge"). Defaults to "firefox".',
+                            'default': 'firefox',
+                            'rc_key': ['facebook', 'cookie'],
+                            'action': ConfigAction
+                        },
+                        {
+                            'flags': ['-o', '--output'],
+                            'action': OutputFileAction
+                        },
+                        {
+                            'flags': ['-s', '--select'],
+                            'help': 'Columns of input CSV file to include in the output (separated by `,`).',
+                            'type': SplitterType()
+                        },
+                        {
+                            'flag': '--throttle',
+                            'help': 'Throttling time, in seconds, to wait between each request.',
+                            'type': float,
+                            'default': FACEBOOK_MOBILE_DEFAULT_THROTTLE
+                        },
+                        {
+                            'flag': '--total',
+                            'help': 'Total number of lines in CSV file. Necessary if you want to display a finite progress indicator for large input files.',
+                            'type': int
+                        }
+                    ]
+                },
                 'post-stats': {
                     'title': 'Minet Facebook Post Stats Command',
                     'description': '''
@@ -854,7 +922,7 @@ MINET_COMMANDS = {
                         examples:
 
                         . Fetching stats about lists of posts in a CSV file:
-                            $ minet fb post-stats post_url fb-posts.csv
+                            $ minet fb post-stats post_url fb-posts.csv > stats.csv
                     ''',
                     'arguments': [
                         {
@@ -885,20 +953,23 @@ MINET_COMMANDS = {
                 'url-likes': {
                     'title': 'Minet Facebook Url Likes Command',
                     'description': '''
-                        Retrieve the approximate number of "likes" each url of
-                        a CSV file has on Facebook.
+                        Retrieve the approximate number of "likes" (actually an aggregated engagement metric)
+                        that a url got on Facebook. The command can also be used with a list of urls stored in a CSV file.
+                        This number is found by scraping Facebook's share button, which only gives a
+                        rough estimation of the real engagement metric: "Share 45K" for example.
 
-                        It is found by scraping Facebook's like button, which only give a
-                        rough estimation of the real number like so: "1.2K people like this."
-
-                        Note that the number does not actually only correspond to the number of
-                        like reactions, but rather to the sum of like, love, ahah, angry, etc.
-                        reactions plus the number of comments and shares that the URL generated on Facebook.
+                        Note that this number does not actually only correspond to the number of
+                        likes or shares, but it is rather the sum of like, love, ahah, angry, etc.
+                        reactions plus the number of comments and shares that the URL got on Facebook
+                        (here is the official documentation: https://developers.facebook.com/docs/plugins/faqs
+                        explaining "What makes up the number shown next to my Share button?").
                     ''',
                     'epilog': '''
                         example:
+                        . Retrieving the "like" number for one url:
+                            $ minet fb url-likes "www.example-url.com" > url_like.csv
 
-                        . Retrieving likes for the urls listed in a CSV file:
+                        . Retrieving the "like" number for the urls listed in a CSV file:
                             $ minet fb url-likes url url.csv > url_likes.csv
                     ''',
                     'arguments': [
@@ -969,7 +1040,7 @@ MINET_COMMANDS = {
               having a name that is the first x characters of the file's name.
               This is an efficient way to partition content into folders containing
               roughly the same number of files if the file names are random (which
-              is the case by default since uuids will be used).
+              is the case by default since md5 hashes will be used).
 
             . "hostname": files will be written in folders based on their url's
               full host name.
@@ -1007,7 +1078,7 @@ MINET_COMMANDS = {
                 'flag': '--max-redirects',
                 'help': 'Maximum number of redirections to follow before breaking. Defaults to 5.',
                 'type': int,
-                'default': 5
+                'default': DEFAULT_FETCH_MAX_REDIRECTS
             },
             {
                 'flag': '--compress',
@@ -1027,7 +1098,7 @@ MINET_COMMANDS = {
             },
             {
                 'flags': ['-f', '--filename'],
-                'help': 'Name of the column used to build retrieved file names. Defaults to an uuid v4. If the provided file names have no extension (e.g. ".jpg", ".pdf", etc.) the correct extension will be added depending on the file type.'
+                'help': 'Name of the column used to build retrieved file names. Defaults to a md5 hash of final url. If the provided file names have no extension (e.g. ".jpg", ".pdf", etc.) the correct extension will be added depending on the file type.'
             },
             {
                 'flag': '--filename-template',
@@ -1364,7 +1435,7 @@ MINET_COMMANDS = {
                 'flag': '--max-redirects',
                 'help': 'Maximum number of redirections to follow before breaking. Defaults to 20.',
                 'type': int,
-                'default': 20
+                'default': DEFAULT_RESOLVE_MAX_REDIRECTS
             },
             {
                 'flag': '--follow-meta-refresh',
@@ -1449,8 +1520,7 @@ MINET_COMMANDS = {
             },
             {
                 'flags': ['-i', '--input-dir'],
-                'help': 'Directory where the HTML files are stored. Defaults to "%s".' % DEFAULT_CONTENT_FOLDER,
-                'default': DEFAULT_CONTENT_FOLDER
+                'help': 'Directory where the HTML files are stored. Defaults to "%s".' % DEFAULT_CONTENT_FOLDER
             },
             {
                 'flags': ['-o', '--output'],
@@ -1603,6 +1673,14 @@ MINET_COMMANDS = {
                     'title': 'Minet Twitter Scrape Command',
                     'description': '''
                         Scrape Twitter's public facing search API to collect tweets etc.
+
+                        Be sure to check Twitter's advanced search to check what kind of
+                        operators you can use to tune your queries (time range, hashtags,
+                        mentions, boolean etc.):
+                        https://twitter.com/search-advanced?f=live
+
+                        Useful operators include "since" and "until" to search specific
+                        time ranges like so: "since:2014-01-01 until:2017-12-31".
                     ''',
                     'epilog': '''
                         examples:
@@ -1615,6 +1693,15 @@ MINET_COMMANDS = {
 
                         . Templating the given CSV column to query tweets by users:
                             $ minet tw scrape tweets user users.csv --query-template 'from:@{value}' > tweets.csv
+
+                        . Tip: You can add a "OR @aNotExistingHandle" to your query to avoid searching
+                          for your query terms in usernames or handles.
+                          Note that this is a temporary hack which might stop working at any time so be
+                          sure to double check before relying on this trick.
+                          For more information see the related discussion here:
+                          https://webapps.stackexchange.com/questions/127425/how-to-exclude-usernames-and-handles-while-searching-twitter
+
+                            $ minet tw scrape tweets "keyword OR @anObviouslyNotExistingHandle"
                     ''',
                     'arguments': [
                         {

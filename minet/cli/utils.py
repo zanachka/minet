@@ -4,17 +4,42 @@
 #
 # Miscellaneous helpers used by the CLI tools.
 #
+import os
 import sys
+import stat
 import yaml
 import platform
 from glob import iglob
-from os.path import join, expanduser, isfile, isdir
+from os.path import join, expanduser, isfile, relpath
 from collections import namedtuple
 from tqdm import tqdm
 from ebbe import noop
 
+from minet.web import (
+    register_global_request_retryer_before_sleep,
+    reset_global_request_retryer_before_sleep
+)
 from minet.cli.exceptions import MissingColumnError
-from minet.utils import fuzzy_int
+from minet.utils import fuzzy_int, prettyprint_seconds
+
+
+def get_stdin_status():
+    mode = os.fstat(sys.stdin.fileno()).st_mode
+
+    if stat.S_ISFIFO(mode):
+        return 'piped'
+    elif stat.S_ISREG(mode):
+        return 'redirected'
+
+    return 'terminal'
+
+
+def is_stdin_empty():
+    return not sys.stdin.buffer.peek(1)
+
+
+def was_piped_something():
+    return get_stdin_status() != 'terminal' and not is_stdin_empty()
 
 
 def print_err(*args, **kwargs):
@@ -56,6 +81,31 @@ class LoadingBar(tqdm):
 
         super().__init__(desc=desc, total=total, **kwargs)
 
+        self.__register_retryer_logger()
+
+    def __register_retryer_logger(self):
+        def callback(retry_state):
+            exc = retry_state.outcome.exception()
+            pretty_time = prettyprint_seconds(retry_state.idle_for, granularity=2)
+
+            exc_name = '%s.%s' % (
+                exc.__class__.__module__,
+                exc.__class__.__name__
+            )
+
+            exc_msg = str(exc)
+
+            msg = '\n'.join([
+                'Failed attempt because of following exception:',
+                ('%s (%s)' % (exc_name, exc_msg)) if exc_msg else exc_name,
+                'Will wait for %s before attempting again.' % pretty_time,
+                ''
+            ])
+
+            self.print(msg)
+
+        register_global_request_retryer_before_sleep(callback)
+
     def update_total(self, total):
         self.total = total
 
@@ -65,16 +115,20 @@ class LoadingBar(tqdm):
 
         return self.set_postfix(**self.__stats)
 
-    def inc(self, name):
+    def inc(self, name, amount=1):
         if name not in self.__stats:
             self.__stats[name] = 0
 
-        self.__stats[name] += 1
+        self.__stats[name] += amount
         return self.update_stats()
 
     def print(self, *args, end='\n'):
         msg = ' '.join(str(arg) for arg in args)
         self.write(msg, file=sys.stderr, end=end)
+
+    def close(self):
+        super().close()
+        reset_global_request_retryer_before_sleep()
 
     def die(self, msg):
         self.close()
@@ -104,45 +158,55 @@ WorkerPayload = namedtuple(
     ['row', 'headers', 'path', 'encoding', 'content', 'args']
 )
 
-REPORT_HEADERS = ['status', 'filename', 'encoding', 'mimetype']
+
+def getdefault(row, pos, default=None):
+    if pos is None:
+        return default
+
+    try:
+        return row[pos] or default
+    except IndexError:
+        return default
 
 
 def create_report_iterator(cli_args, reader, worker_args=None, on_irrelevant_row=noop):
-    for col in REPORT_HEADERS:
-        if col not in reader.pos:
-            raise MissingColumnError(col)
+    if 'filename' not in reader.headers:
+        raise MissingColumnError
 
-    status_pos = reader.pos.status
-    filename_pos = reader.pos.filename
-    encoding_pos = reader.pos.encoding
-    mimetype_pos = reader.pos.mimetype
-    raw_content_pos = reader.pos.get('raw_contents')
+    filename_pos = reader.headers.filename
+    error_pos = reader.headers.get('error')
+    status_pos = reader.headers.get('status')
+    filename_pos = reader.headers.get('filename')
+    encoding_pos = reader.headers.get('encoding')
+    mimetype_pos = reader.headers.get('mimetype')
+    raw_content_pos = reader.headers.get('raw_contents')
 
-    if raw_content_pos is None and not isdir(cli_args.input_dir):
-        raise NotADirectoryError
-
-    indexed_headers = reader.pos.as_dict()
+    indexed_headers = reader.headers.as_dict()
 
     def generator():
-        for row in reader:
-            status = fuzzy_int(row[status_pos]) if row[status_pos] else None
-            mimetype = row[mimetype_pos]
-            filename = row[filename_pos]
+        for i, row in enumerate(reader):
+            error = getdefault(row, error_pos)
 
-            if status is None:
-                on_irrelevant_row('no-status', row)
+            if error is not None:
+                on_irrelevant_row('errored', row, i)
                 continue
 
+            status = fuzzy_int(getdefault(row, status_pos, '200'))
+
+            mimetype = getdefault(row, mimetype_pos, 'text/html').strip()
+            filename = row[filename_pos]
+            encoding = getdefault(row, encoding_pos, 'utf-8').strip()
+
             if status != 200:
-                on_irrelevant_row('invalid-status', row)
+                on_irrelevant_row('invalid-status', row, i)
                 continue
 
             if not filename:
-                on_irrelevant_row('no-filename', row)
+                on_irrelevant_row('no-filename', row, i)
                 continue
 
             if '/htm' not in mimetype:
-                on_irrelevant_row('invalid-mimetype', row)
+                on_irrelevant_row('invalid-mimetype', row, i)
                 continue
 
             if raw_content_pos is not None:
@@ -150,15 +214,14 @@ def create_report_iterator(cli_args, reader, worker_args=None, on_irrelevant_row
                     row=row,
                     headers=indexed_headers,
                     path=None,
-                    encoding=row[encoding_pos],
+                    encoding=encoding,
                     content=row[raw_content_pos],
                     args=worker_args
                 )
 
                 continue
 
-            path = join(cli_args.input_dir, filename)
-            encoding = row[encoding_pos].strip() or 'utf-8'
+            path = join(cli_args.input_dir or '', filename)
 
             yield WorkerPayload(
                 row=row,
@@ -172,16 +235,14 @@ def create_report_iterator(cli_args, reader, worker_args=None, on_irrelevant_row
     return generator()
 
 
-def create_glob_iterator(cli_args, worker_args):
-    for p in iglob(cli_args.glob, recursive=True):
-        yield WorkerPayload(
-            row=None,
-            headers=None,
-            path=p,
-            encoding='utf-8',
-            content=None,
-            args=worker_args
-        )
+def dummy_csv_file_from_glob(pattern, root_directory=None):
+    if root_directory is not None:
+        pattern = join(root_directory, pattern)
+
+    yield ['filename']
+
+    for p in iglob(pattern, recursive=True):
+        yield [relpath(p, start=root_directory or '')]
 
 
 def get_rcfile(rcfile_path=None):

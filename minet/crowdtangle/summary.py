@@ -8,11 +8,8 @@ from ebbe import getpath
 from urllib.parse import quote
 
 from minet.crowdtangle.exceptions import (
-    CrowdTangleMissingTokenError,
-    CrowdTangleInvalidTokenError,
-    CrowdTangleInvalidRequestError
+    CrowdTangleMissingTokenError
 )
-from minet.web import request_json
 from minet.crowdtangle.constants import (
     CROWDTANGLE_SUMMARY_DEFAULT_SORT_TYPE,
     CROWDTANGLE_SUMMARY_SORT_TYPES
@@ -49,7 +46,7 @@ def url_forge(link, token, start_date, sort_by, platforms=None, include_posts=Fa
     return base_url
 
 
-def crowdtangle_summary(pool, link, token=None, start_date=None, with_top_posts=False,
+def crowdtangle_summary(request, link, token=None, start_date=None, with_top_posts=False,
                         sort_by=CROWDTANGLE_SUMMARY_DEFAULT_SORT_TYPE, raw=False, platforms=None):
 
     if token is None:
@@ -71,19 +68,10 @@ def crowdtangle_summary(pool, link, token=None, start_date=None, with_top_posts=
         with_top_posts
     )
 
-    err, response, data = request_json(api_url, pool=pool)
+    data = request(api_url)
 
-    if err is not None:
-        raise err
-
-    if response.status == 401:
-        raise CrowdTangleInvalidTokenError
-
-    if response.status >= 400:
-        raise CrowdTangleInvalidRequestError(api_url)
-
-    stats = getpath(data, ['result', 'summary', 'facebook'])
-    posts = getpath(data, ['result', 'posts']) if with_top_posts else None
+    stats = getpath(data, ['summary', 'facebook'])
+    posts = getpath(data, ['posts']) if with_top_posts else None
 
     if stats is not None:
         if not raw:

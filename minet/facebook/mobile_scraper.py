@@ -15,7 +15,9 @@ from ural.facebook import (
     parse_facebook_url,
     convert_facebook_url_to_mobile,
     has_facebook_comments,
-    FacebookGroup as ParsedFacebookGroup
+    FacebookGroup as ParsedFacebookGroup,
+    FacebookHandle as ParsedFacebookHandle,
+    FacebookUser as ParsedFacebookUser
 )
 
 from minet.utils import (
@@ -23,10 +25,10 @@ from minet.utils import (
     RateLimiterState,
     parse_date
 )
-from minet.web import create_pool, request, create_request_retryer
+from minet.web import create_pool, request, create_request_retryer, retrying_method
 from minet.scrape.std import get_display_text
 from minet.facebook.utils import grab_facebook_cookie
-from minet.facebook.formatters import FacebookComment, FacebookPost
+from minet.facebook.formatters import FacebookComment, FacebookPost, FacebookUser
 from minet.facebook.exceptions import (
     FacebookInvalidCookieError,
     FacebookInvalidTargetError
@@ -309,8 +311,10 @@ class FacebookMobileScraper(object):
         self.pool = create_pool()
 
         self.rate_limiter_state = RateLimiterState(1, throttle)
+        self.retryer = create_request_retryer()
 
     @rate_limited_method()
+    @retrying_method()
     def request_page(self, url):
         error, result = request(
             url,
@@ -341,12 +345,10 @@ class FacebookMobileScraper(object):
             calls = 0
             replies = 0
 
-            retryer = create_request_retryer()
-
             while len(url_queue) != 0:
                 current_url, direction, in_reply_to = url_queue.popleft()
 
-                html = retryer(self.request_page, current_url)
+                html = self.request_page(current_url)
 
                 try:
                     data = scrape_comments(html, direction, in_reply_to)
@@ -396,12 +398,10 @@ class FacebookMobileScraper(object):
         url = convert_url_to_mobile(parsed.url)
 
         def generator():
-
-            retryer = create_request_retryer()
             current_url = url
 
             while True:
-                html = retryer(self.request_page, current_url)
+                html = self.request_page(current_url)
 
                 # with open('./dump.html', 'w') as f:
                 #     f.write(html)
@@ -417,3 +417,38 @@ class FacebookMobileScraper(object):
                 current_url = next_url
 
         return generator()
+
+    def post_author(self, url):
+        if not has_facebook_comments(url):
+            raise FacebookInvalidTargetError
+
+        # Reformatting url to hit mobile website
+        url = convert_url_to_mobile(url)
+
+        html = self.request_page(url)
+        soup = BeautifulSoup(html, 'lxml')
+
+        user_item = soup.select_one('[data-ft] h3 a[href]')
+
+        if user_item is None:
+            return None
+
+        parsed = parse_facebook_url(user_item.get('href'), allow_relative_urls=True)
+        user_label = user_item.get_text().strip()
+
+        if isinstance(parsed, ParsedFacebookHandle):
+            return FacebookUser(
+                user_label,
+                None,
+                parsed.handle,
+                parsed.url
+            )
+        elif isinstance(parsed, ParsedFacebookUser):
+            return FacebookUser(
+                user_label,
+                parsed.id,
+                parsed.handle,
+                parsed.url
+            )
+        else:
+            raise TypeError

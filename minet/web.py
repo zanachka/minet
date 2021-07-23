@@ -12,6 +12,7 @@ import urllib3
 import ural
 import json
 import mimetypes
+import functools
 import cchardet as chardet
 from collections import OrderedDict
 from json.decoder import JSONDecodeError
@@ -22,6 +23,7 @@ from tenacity import (
     Retrying,
     wait_random_exponential,
     retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt
 )
 
@@ -358,7 +360,8 @@ def raw_resolve(http, url, method='GET', headers=None, max_redirects=5,
                             location = p[1]
                             redirection.type = 'refresh-header'
 
-                if location is None and follow_meta_refresh:
+                # Reading a small chunk of the html
+                if location is None and (follow_meta_refresh or follow_js_relocation):
                     try:
                         response._body = response.read(CONTENT_CHUNK_SIZE)
                     except Exception as e:
@@ -366,27 +369,20 @@ def raw_resolve(http, url, method='GET', headers=None, max_redirects=5,
                         redirection.type = 'error'
                         break
 
+                # Meta refresh
+                if location is None and follow_meta_refresh:
                     meta_refresh = find_meta_refresh(response._body)
 
                     if meta_refresh is not None:
                         location = meta_refresh[1]
-
                         redirection.type = 'meta-refresh'
 
+                # JavaScript relocation
                 if location is None and follow_js_relocation:
-                    try:
-                        if response._body is None:
-                            response._body = response.read(CONTENT_CHUNK_SIZE)
-                    except Exception as e:
-                        error = e
-                        redirection.type = 'error'
-                        break
-
                     js_relocation = find_javascript_relocation(response._body)
 
                     if js_relocation is not None:
                         location = js_relocation
-
                         redirection.type = 'js-relocation'
 
             # Found the end
@@ -503,7 +499,7 @@ def request(url, pool=DEFAULT_POOL, method='GET', headers=None, cookie=None, spo
             timeout=timeout
         )
     else:
-        err, stack, response = raw_resolve(
+        err, _, response = raw_resolve(
             pool,
             url,
             method,
@@ -534,7 +530,7 @@ def request(url, pool=DEFAULT_POOL, method='GET', headers=None, cookie=None, spo
 
 
 def resolve(url, pool=DEFAULT_POOL, method='GET', headers=None, cookie=None, spoof_ua=True,
-            follow_redirects=True, max_redirects=5, follow_refresh_header=True,
+            max_redirects=5, follow_refresh_header=True,
             follow_meta_refresh=False, follow_js_relocation=False,
             infer_redirection=False, timeout=None):
 
@@ -562,7 +558,8 @@ def extract_response_meta(response, guess_encoding=True, guess_extension=True):
     meta = {
         'ext': None,
         'mimetype': None,
-        'encoding': None
+        'encoding': None,
+        'is_text': None
     }
 
     # Guessing extension
@@ -593,8 +590,11 @@ def extract_response_meta(response, guess_encoding=True, guess_extension=True):
             meta['mimetype'] = mimetype
             meta['ext'] = ext
 
-    if meta['mimetype'] is not None and is_binary_mimetype(meta['mimetype']):
-        guess_encoding = False
+    if meta['mimetype'] is not None:
+        meta['is_text'] = not is_binary_mimetype(meta['mimetype'])
+
+        if not meta['is_text']:
+            guess_encoding = False
 
     # Guessing encoding
     if guess_encoding:
@@ -651,22 +651,77 @@ def request_text(url, pool=DEFAULT_POOL, *args, encoding='utf-8', **kwargs):
 
 
 THREE_HOURS = 3 * 60 * 60
+GLOBAL_RETRYER_BEFORE_SLEEP = None
+
+
+def register_global_request_retryer_before_sleep(callback):
+    global GLOBAL_RETRYER_BEFORE_SLEEP
+
+    if not callable(callback):
+        raise TypeError
+
+    GLOBAL_RETRYER_BEFORE_SLEEP = callback
+
+
+def reset_global_request_retryer_before_sleep():
+    global GLOBAL_RETRYER_BEFORE_SLEEP
+
+    GLOBAL_RETRYER_BEFORE_SLEEP = None
+
+
+def wrap_before_sleep_callback_with_global_hook(callback):
+    def chain(*args, **kwargs):
+        if GLOBAL_RETRYER_BEFORE_SLEEP is not None:
+            GLOBAL_RETRYER_BEFORE_SLEEP(*args, **kwargs)
+
+        if callback is not None:
+            callback(*args, **kwargs)
+
+    return chain
 
 
 def create_request_retryer(min=10, max=THREE_HOURS, max_attempts=9, before_sleep=None,
-                           additional_exceptions=None):
+                           additional_exceptions=None, predicate=None):
+    global GLOBAL_RETRYER_BEFORE_SLEEP
 
-    retry_for = [urllib3.exceptions.TimeoutError]
+    retryable_exception_types = [
+        urllib3.exceptions.TimeoutError,
+        urllib3.exceptions.ProtocolError
+    ]
 
     if additional_exceptions:
         for exc in additional_exceptions:
-            retry_for.append(exc)
+            retryable_exception_types.append(exc)
+
+    before_sleep_chain = wrap_before_sleep_callback_with_global_hook(before_sleep)
+
+    retry_condition = retry_if_exception_type(
+        exception_types=tuple(retryable_exception_types)
+    )
+
+    if callable(predicate):
+        retry_condition |= retry_if_exception(predicate)
 
     return Retrying(
         wait=wait_random_exponential(exp_base=6, min=min, max=max),
-        retry=retry_if_exception_type(
-            exception_types=tuple(retry_for)
-        ),
+        retry=retry_condition,
         stop=stop_after_attempt(max_attempts),
-        before_sleep=before_sleep if callable(before_sleep) else None
+        before_sleep=before_sleep_chain
     )
+
+
+def retrying_method(attr='retryer'):
+    def decorate(fn):
+
+        @functools.wraps(fn)
+        def decorated(self, *args, **kwargs):
+            retryer = getattr(self, attr)
+
+            if not isinstance(retryer, Retrying):
+                raise ValueError
+
+            return retryer(fn, self, *args, **kwargs)
+
+        return decorated
+
+    return decorate

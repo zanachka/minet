@@ -1,10 +1,10 @@
-[![Build Status](https://github.com/medialab/minet/workflows/Tests/badge.svg)](https://github.com/medialab/minet/actions) [![DOI](https://zenodo.org/badge/169059797.svg)](https://zenodo.org/badge/latestdoi/169059797)
+[![Build Status](https://github.com/medialab/minet/workflows/Tests/badge.svg)](https://github.com/medialab/minet/actions) [![DOI](https://zenodo.org/badge/169059797.svg)](https://zenodo.org/badge/latestdoi/169059797) [![download number](https://static.pepy.tech/badge/minet)](https://pepy.tech/project/minet)
 
 ![Minet](img/minet.png)
 
 **minet** is a webmining command line tool & library for python (>= 3.6) that can be used to collect and extract data from a large variety of web sources such as raw webpages, Facebook, CrowdTangle, YouTube, Twitter, Media Cloud etc.
 
-It adopts a very simple approach to various webmining problems by letting you perform a variety of actions from the comfort of your command line. No database needed: raw data files such as CSV should be sufficient to do the work.
+It adopts a very simple approach to various webmining problems by letting you perform a variety of actions from the comfort of the command line. No database needed: raw CSV files should be sufficient to do most of the work.
 
 In addition, **minet** also exposes its high-level programmatic interface as a python library so you can tweak its behavior at will.
 
@@ -52,6 +52,7 @@ Minet can single-handedly:
 * [Fetching a large amount of urls](./cookbook/fetch.md)
 * [Joining 2 CSV files by urls](./cookbook/url_join.md)
 * [Using minet from a Jupyter notebook](./cookbook/notebooks/Minet%20in%20a%20Jupyter%20notebook.ipynb) (*very useful to experiment with the tool or teach students*)
+* [Downloading images associated with a given hashtag on Twitter](./cookbook/twitter_images.md)
 * [Scraping DSL Tutorial](./cookbook/scraping_dsl.md)
 
 ## Features (from a technical standpoint)

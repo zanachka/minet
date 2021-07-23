@@ -7,14 +7,9 @@
 import casanova
 import ndjson
 
-from minet.utils import prettyprint_seconds
 from minet.cli.utils import print_err, die, LoadingBar
 from minet.crowdtangle import CrowdTangleAPIClient
-from minet.crowdtangle.exceptions import (
-    CrowdTangleInvalidTokenError,
-    CrowdTangleRateLimitExceeded,
-    CrowdTangleInvalidJSONError
-)
+from minet.crowdtangle.exceptions import CrowdTangleInvalidTokenError
 
 
 def make_paginated_action(method_name, item_name, csv_headers, get_args=None,
@@ -56,31 +51,15 @@ def make_paginated_action(method_name, item_name, csv_headers, get_args=None,
             total=cli_args.limit
         )
 
-        client = CrowdTangleAPIClient(cli_args.token, rate_limit=cli_args.rate_limit)
-
         args = []
 
         if callable(get_args):
             args = get_args(cli_args)
 
-        def before_sleep(retry_state):
-            exc = retry_state.outcome.exception()
-
-            if isinstance(exc, CrowdTangleRateLimitExceeded):
-                reason = 'Call failed because of rate limit!'
-
-            elif isinstance(exc, CrowdTangleInvalidJSONError):
-                reason = 'Call failed because of invalid JSON payload!'
-
-            else:
-                reason = 'Call failed because of server timeout!'
-
-            loading_bar.print(
-                '%s\nWill wait for %s before attempting again.' % (
-                    reason,
-                    prettyprint_seconds(retry_state.idle_for, granularity=2)
-                )
-            )
+        client = CrowdTangleAPIClient(
+            cli_args.token,
+            rate_limit=cli_args.rate_limit
+        )
 
         create_iterator = getattr(client, method_name)
         iterator = create_iterator(
@@ -89,8 +68,7 @@ def make_paginated_action(method_name, item_name, csv_headers, get_args=None,
             raw=cli_args.format != 'csv',
             per_call=True,
             detailed=True,
-            namespace=cli_args,
-            before_sleep=before_sleep
+            namespace=cli_args
         )
 
         try:

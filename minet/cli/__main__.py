@@ -12,6 +12,7 @@ import ctypes
 import shutil
 import importlib
 import multiprocessing
+import casanova
 from textwrap import dedent
 from tqdm import tqdm
 from contextlib import ExitStack
@@ -23,25 +24,17 @@ from colorama import init as colorama_init
 from encodings import idna  # NOTE: this is necessary for pyinstaller build
 
 from minet.__version__ import __version__
+from minet.cli.constants import DEFAULT_PREBUFFER_BYTES
 from minet.cli.utils import die, get_rcfile
 from minet.cli.argparse import resolve_arg_dependencies
-from minet.cli.exceptions import NotResumable
+from minet.cli.exceptions import NotResumable, InvalidArgumentsError
 
 from minet.cli.commands import MINET_COMMANDS
 
-# Colorama
-colorama_init()
-
-SUBPARSERS = {}
-
-# Getting terminal size
-terminal_size = shutil.get_terminal_size()
-
-# Increasing max CSV file limit to avoid pesky issues
-csv.field_size_limit(int(ctypes.c_ulong(-1).value // 2))
-
 
 def custom_formatter(prog):
+    terminal_size = shutil.get_terminal_size()
+
     return RawTextHelpFormatter(
         prog,
         max_help_position=50,
@@ -110,8 +103,6 @@ def build_description(command):
 
 def build_subparsers(parser, index, commands, help='Action to execute', title='actions',
                      dest='action', common_arguments=[]):
-
-    subparser_index = {}
 
     subparsers = parser.add_subparsers(
         help=help,
@@ -214,7 +205,11 @@ def main():
             for buffer in to_close:
                 stack.callback(buffer.close)
 
-            fn(cli_args)
+            try:
+                fn(cli_args)
+            except InvalidArgumentsError as e:
+                parser.error(e.message)
+                sys.exit(1)
 
     elif cli_args.action == 'help':
 
@@ -234,10 +229,21 @@ def main():
 
 
 if __name__ == '__main__':
+    # Freezing multiprocessing support for pyinstaller etc.
     multiprocessing.freeze_support()
+
+    # Colorama initialization hook
+    colorama_init()
+
+    # Increasing max CSV file limit to avoid pesky issues
+    csv.field_size_limit(int(ctypes.c_ulong(-1).value // 2))
+
+    # Casanova global defaults
+    casanova.set_default_prebuffer_bytes(DEFAULT_PREBUFFER_BYTES)
 
     try:
         main()
+
     except BrokenPipeError:
 
         # Taken from: https://docs.python.org/3/library/signal.html

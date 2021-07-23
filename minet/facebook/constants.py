@@ -17,6 +17,13 @@ FACEBOOK_WEB_DEFAULT_THROTTLE = 20.0
 FACEBOOK_MOBILE_RATE_LIMITER_STATE = RateLimiterState(1, FACEBOOK_MOBILE_DEFAULT_THROTTLE)
 FACEBOOK_WEB_RATE_LIMITER_STATE = RateLimiterState(1, FACEBOOK_WEB_DEFAULT_THROTTLE)
 
+FACEBOOK_USER_CSV_HEADERS = [
+    'user_label',
+    'user_id',
+    'user_handle',
+    'user_url'
+]
+
 FACEBOOK_COMMENT_CSV_HEADERS = [
     'post_id',
     'id',
@@ -73,5 +80,6 @@ FACEBOOK_REACTION_KEYS = OrderedDict({
     7: 'sad',
     8: 'angry',
     11: 'thankful',
-    12: 'pride'
+    12: 'pride',
+    16: 'care'
 })
